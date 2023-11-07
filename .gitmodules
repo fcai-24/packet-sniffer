@@ -1,0 +1,12 @@
+[submodule "libs/spdlog"]
+	path = libs/spdlog
+	url = https://github.com/gabime/spdlog.git
+[submodule "libs/glfw"]
+	path = libs/glfw
+	url = https://github.com/glfw/glfw
+[submodule "libs/imgui"]
+	path = libs/imgui
+	url = https://github.com/fcai-24/imgui
+[submodule "libs/libpcap"]
+	path = libs/libpcap
+	url = https://github.com/the-tcpdump-group/libpcap

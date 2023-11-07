@@ -45,4 +45,28 @@ file(
 # takes all the source files found and add them to make a executable (our app)
 add_executable(packet-sniffer ${SRC})
 
+# =================== external libraries ===============================
+find_package(OpenGL REQUIRED)
+
+# glfw library made to create windows and recive events
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory("libs/glfw" EXCLUDE_FROM_ALL)
+
+# imgui library used for gui
+add_subdirectory("libs/imgui")
+
+# libpcap used for the packet capturing and interfacing with the kernel
+add_subdirectory("libs/libpcap" EXCLUDE_FROM_ALL)
+
+# spdlog library used for loggin
+add_subdirectory("libs/spdlog" EXCLUDE_FROM_ALL)
+
+target_link_libraries(packet-sniffer OpenGL::GL)
+target_link_libraries(packet-sniffer glfw)
+target_link_libraries(packet-sniffer imgui)
+target_link_libraries(packet-sniffer spdlog::spdlog)
+target_link_libraries(packet-sniffer pcap)
 
