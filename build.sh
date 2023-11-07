@@ -19,6 +19,6 @@ mkdir -p build
 # generate build files
 cmake -S ./ -B ./build
 # build executable
-cmake --build ./build
+cmake --build ./build -j${nproc}
 
 echo "Executable built u can run it using ./build/packet-sniffer"
