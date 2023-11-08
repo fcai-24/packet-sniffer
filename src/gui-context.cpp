@@ -36,6 +36,6 @@ namespace ps {
 		ImGui_ImplOpenGL3_Shutdown();
 		ImGui_ImplGlfw_Shutdown();
 		ImGui::DestroyContext();
-		glfwTerminate();
+		glfwDestroyWindow(window);
 	}
 }		 // namespace ps

@@ -59,7 +59,7 @@ add_subdirectory("libs/glfw" EXCLUDE_FROM_ALL)
 add_subdirectory("libs/imgui")
 
 # libpcap used for the packet capturing and interfacing with the kernel
-add_subdirectory("libs/libpcap" EXCLUDE_FROM_ALL)
+add_subdirectory("libs/pcap" EXCLUDE_FROM_ALL)
 
 # spdlog library used for loggin
 add_subdirectory("libs/spdlog" EXCLUDE_FROM_ALL)
@@ -68,5 +68,6 @@ target_link_libraries(packet-sniffer OpenGL::GL)
 target_link_libraries(packet-sniffer glfw)
 target_link_libraries(packet-sniffer imgui)
 target_link_libraries(packet-sniffer spdlog::spdlog)
-target_link_libraries(packet-sniffer pcap)
+target_link_libraries(packet-sniffer Pcap++)
+target_link_libraries(packet-sniffer Packet++)
 
