@@ -61,7 +61,6 @@ struct PacketsData {
 	PacketStats stats;
 };
 
-struct PacketsData;
 void on_packet(pcpp::RawPacket* raw_packet, pcpp::PcapLiveDevice* device, void* data) {
 	auto casted_data = static_cast<PacketsData*>(data);
 	packets_lock.lock();
