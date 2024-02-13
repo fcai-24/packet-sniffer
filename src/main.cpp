@@ -6,6 +6,7 @@
 #include "gui-context.hpp"
 #include "imgui.h"
 #include "PcapLiveDeviceList.h"
+#include "gui/imgui_memory_editor.h"
 
 std::mutex packets_lock;
 
@@ -46,13 +47,13 @@ struct PacketStats {
 
 	void draw() {
 		ImGui::Text("Ethernet packet count: %i", ethPacketCount);
-		ImGui::Text("IPv4 packet count:     %i", ipv4PacketCount);
-		ImGui::Text("IPv6 packet count:     %i", ipv6PacketCount);
-		ImGui::Text("TCP packet count:      %i", tcpPacketCount);
-		ImGui::Text("UDP packet count:      %i", udpPacketCount);
-		ImGui::Text("DNS packet count:      %i", dnsPacketCount);
-		ImGui::Text("HTTP packet count:     %i", httpPacketCount);
-		ImGui::Text("SSL packet count:      %i", sslPacketCount);
+		ImGui::TextColored(ImVec4(0, 1, 0, 1), "IPv4 packet count:     %i", ipv4PacketCount);
+		ImGui::TextColored(ImVec4(0, 1, 0, 1), "IPv6 packet count:     %i", ipv6PacketCount);
+		ImGui::TextColored(ImVec4(0.92, 0.4, 0.92, 1), "TCP packet count:      %i", tcpPacketCount);
+		ImGui::TextColored(ImVec4(0.92, 0.4, 0.92, 1), "UDP packet count:      %i", udpPacketCount);
+		ImGui::TextColored(ImVec4(0.4, 0.92, 0.92, 1), "DNS packet count:      %i", dnsPacketCount);
+		ImGui::TextColored(ImVec4(0.4, 0.92, 0.92, 1), "HTTP packet count:     %i", httpPacketCount);
+		ImGui::TextColored(ImVec4(0.4, 0.92, 0.92, 1), "SSL packet count:      %i", sslPacketCount);
 	}
 };
 
@@ -73,12 +74,14 @@ void on_packet(pcpp::RawPacket* raw_packet, pcpp::PcapLiveDevice* device, void* 
 int main(int argc, char* argv[]) {
 	ps::Log::init();
 	ps::GuiContext gui_context{1280, 720, "Packet Sniffer"};
+	MemoryEditor memory_editor{};
 
 	auto device_list = pcpp::PcapLiveDeviceList::getInstance().getPcapLiveDevicesList();
 	pcpp::PcapLiveDevice* active_device = nullptr;
 
 	struct {
 		std::optional<pcpp::Packet> active_packet;
+		pcpp::Layer* active_layer = nullptr;
 		u64 active_packet_index = -1;
 	} state;
 
@@ -126,10 +129,23 @@ int main(int argc, char* argv[]) {
 			for (auto& packet : data.packets) {
 				if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(0.0f);
 				std::string id = packet.getLastLayer()->toString() + "##" + std::to_string(i);
+
+				auto layer = packet.getLastLayer()->getOsiModelLayer();
+				if(layer == pcpp::OsiModelNetworkLayer)
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 1, 0, 1));
+				else if(layer == pcpp::OsiModelTransportLayer)
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92, 0.4, 0.92, 1));
+				else if(layer == pcpp::OsiModelApplicationLayer)
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4, 0.92, 0.92, 1));
+				else
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+
 				if (ImGui::Selectable(id.c_str(), i == state.active_packet_index)) {
 					state.active_packet = packet;
 					state.active_packet_index = i;
 				};
+
+				ImGui::PopStyleColor();
 				ImGui::Separator();
 				i++;
 			}
@@ -138,13 +154,28 @@ int main(int argc, char* argv[]) {
 		}
 
 		if (state.active_packet.has_value()) {
-			std::vector<std::string> layers;
-			state.active_packet->toStringList(layers);
-			ImGui::Begin("Packet");
-			for (auto& layer : layers) {
-				ImGui::Text("%s", layer.c_str());
+			ImGui::Begin("Packet Inspector");
+			auto layer = state.active_packet->getFirstLayer();
+			while (layer) {
+				if(layer->getOsiModelLayer() == pcpp::OsiModelNetworkLayer)
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 1, 0, 1));
+				else if(layer->getOsiModelLayer() == pcpp::OsiModelTransportLayer)
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92, 0.4, 0.92, 1));
+				else if(layer->getOsiModelLayer() == pcpp::OsiModelApplicationLayer)
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4, 0.92, 0.92, 1));
+				else
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+
+				ImGui::Text("%s", layer->toString().c_str());
+				ImGui::PopStyleColor();
+
+				layer = layer->getNextLayer();
 			}
 			ImGui::End();
+
+			memory_editor.DrawWindow("Raw Data",
+					(void*)state.active_packet.value().getRawPacket()->getRawData(),
+					state.active_packet.value().getRawPacket()->getRawDataLen());
 		}
 
 		gui_context.end_frame();

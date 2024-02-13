@@ -22,12 +22,10 @@ namespace ps {
 #define PS_WARN(...)		 ::ps::Log::core_logger->warn(__VA_ARGS__)
 #define PS_ERROR(...)		 ::ps::Log::core_logger->error(__VA_ARGS__)
 #define PS_CRITICAL(...) ::ps::Log::core_logger->critical(__VA_ARGS__)
-#define PS_ASSERT(to_check, ...)                       \
-	{                                                    \
-		if (!(to_check)) {                                 \
+#define PS_ASSERT(to_check, ...)                 \
+	{                                              \
+		if (!(to_check)) {                           \
 			PS_ERROR("Assert failed {}", __VA_ARGS__); \
-			abort();                                         \
-		}                                                  \
+			abort();                                   \
+		}                                            \
 	}
-
-
