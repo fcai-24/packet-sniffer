@@ -25,4 +25,6 @@ echo: ===============
 
 if %errorlevel% neq 0 (echo: -[hadz] error .. make sure that u have cmake and npcap .. also just msg me) else (echo: -[hadz] nice everything should work now try to open build folder and open packet-sniffer.sln)
 
+start build\packet-sniffer.sln
+
 pause

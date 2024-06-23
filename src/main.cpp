@@ -8,6 +8,14 @@
 #include "PcapLiveDeviceList.h"
 #include "gui/imgui_memory_editor.h"
 
+// this cuz windows and unix interpet 
+// name and description differently
+#if _WIN32 // windows
+	#define DEVICE_NAME(d) d->getDesc().c_str()
+#else // unix
+	#define DEVICE_NAME(d) d->getName().c_str()
+#endif
+
 std::mutex packets_lock;
 
 struct PacketStats {
@@ -72,13 +80,12 @@ void on_packet(pcpp::RawPacket* raw_packet, pcpp::PcapLiveDevice* device, void* 
 }
 
 #if _WIN32
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow){
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
 #else
 int main() {
 #endif
 
 	ps::Log::init();
-	ps::GuiContext gui_context{1280, 720, "Packet Sniffer"};
 	MemoryEditor memory_editor{};
 
 	auto device_list = pcpp::PcapLiveDeviceList::getInstance().getPcapLiveDevicesList();
@@ -92,6 +99,10 @@ int main() {
 
 	PacketsData data;
 
+	// this should always be the last variable before 
+	// the loop so it's the first to be cleaned
+	// cuz we need the gui to desapier and then close other stuff
+	ps::GuiContext gui_context{1280, 720, "Packet Sniffer"};
 	while (!gui_context.should_close()) {
 		gui_context.start_frame();
 
@@ -104,7 +115,7 @@ int main() {
 
 		ImGui::Begin("Devices");
 		for (auto device : device_list) {
-			if (ImGui::Selectable(device->getName().c_str(), device->isOpened())) {
+			if (ImGui::Selectable(DEVICE_NAME(device), device->isOpened())) {
 				if (active_device && active_device->isOpened()) {
 					active_device->stopCapture();
 					active_device->close();
@@ -136,11 +147,11 @@ int main() {
 				std::string id = packet.getLastLayer()->toString() + "##" + std::to_string(i);
 
 				auto layer = packet.getLastLayer()->getOsiModelLayer();
-				if(layer == pcpp::OsiModelNetworkLayer)
+				if (layer == pcpp::OsiModelNetworkLayer)
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 1, 0, 1));
-				else if(layer == pcpp::OsiModelTransportLayer)
+				else if (layer == pcpp::OsiModelTransportLayer)
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92, 0.4, 0.92, 1));
-				else if(layer == pcpp::OsiModelApplicationLayer)
+				else if (layer == pcpp::OsiModelApplicationLayer)
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4, 0.92, 0.92, 1));
 				else
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
@@ -162,11 +173,11 @@ int main() {
 			ImGui::Begin("Packet Inspector");
 			auto layer = state.active_packet->getFirstLayer();
 			while (layer) {
-				if(layer->getOsiModelLayer() == pcpp::OsiModelNetworkLayer)
+				if (layer->getOsiModelLayer() == pcpp::OsiModelNetworkLayer)
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 1, 0, 1));
-				else if(layer->getOsiModelLayer() == pcpp::OsiModelTransportLayer)
+				else if (layer->getOsiModelLayer() == pcpp::OsiModelTransportLayer)
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92, 0.4, 0.92, 1));
-				else if(layer->getOsiModelLayer() == pcpp::OsiModelApplicationLayer)
+				else if (layer->getOsiModelLayer() == pcpp::OsiModelApplicationLayer)
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4, 0.92, 0.92, 1));
 				else
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
@@ -178,9 +189,9 @@ int main() {
 			}
 			ImGui::End();
 
-			
 			gui_context.push_font_mono();
-			memory_editor.DrawWindow("Raw Data",
+			memory_editor.DrawWindow(
+					"Raw Data",
 					(void*)state.active_packet.value().getRawPacket()->getRawData(),
 					state.active_packet.value().getRawPacket()->getRawDataLen());
 			gui_context.pull_font_mono();
