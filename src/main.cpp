@@ -173,9 +173,12 @@ int main(int argc, char* argv[]) {
 			}
 			ImGui::End();
 
+			
+			gui_context.push_font_mono();
 			memory_editor.DrawWindow("Raw Data",
 					(void*)state.active_packet.value().getRawPacket()->getRawData(),
 					state.active_packet.value().getRawPacket()->getRawDataLen());
+			gui_context.pull_font_mono();
 		}
 
 		gui_context.end_frame();

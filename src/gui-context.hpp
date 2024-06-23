@@ -42,7 +42,11 @@ namespace ps {
 			glfwSwapBuffers(window);
 		}
 
+		void push_font_mono() { ImGui::PushFont(mono); }
+		void pull_font_mono() { ImGui::PopFont(); }
+
 	private:
 		GLFWwindow* window;
+		ImFont* mono;
 	};
 }		 // namespace ps

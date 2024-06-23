@@ -111,6 +111,7 @@ namespace ps {
 		// gui tweeks
 		apply_imgui_theme(); // change default colors
 		auto font = io.Fonts->AddFontFromMemoryTTF(__IBMPlexSans_ttf, __IBMPlexSans_ttf_len, 18);
+		mono = io.FontDefault;
 		io.FontDefault = font;
 		// ImGui::StyleColorsLight();
 	}
