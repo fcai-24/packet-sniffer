@@ -71,7 +71,12 @@ void on_packet(pcpp::RawPacket* raw_packet, pcpp::PcapLiveDevice* device, void* 
 	packets_lock.unlock();
 }
 
-int main(int argc, char* argv[]) {
+#if _WIN32
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow){
+#else
+int main() {
+#endif
+
 	ps::Log::init();
 	ps::GuiContext gui_context{1280, 720, "Packet Sniffer"};
 	MemoryEditor memory_editor{};

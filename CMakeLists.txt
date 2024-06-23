@@ -26,11 +26,11 @@ endif()
 # Link compile commands in root if it's not visual studio
 # for lsp in vscode and neovim
 if (NOT CMAKE_GENERATOR MATCHES "Visual Studio")
-  execute_process(
-  	COMMAND ${CMAKE_COMMAND} -E create_symlink
-  		${CMAKE_BINARY_DIR}/compile_commands.json
-  		${CMAKE_SOURCE_DIR}/compile_commands.json
-  )
+	execute_process(
+		COMMAND ${CMAKE_COMMAND} -E create_symlink
+			${CMAKE_BINARY_DIR}/compile_commands.json
+			${CMAKE_SOURCE_DIR}/compile_commands.json
+	)
 endif()
 
 # ================== Application related =============================
@@ -43,7 +43,17 @@ file(
 )
 
 # takes all the source files found and add them to make a executable (our app)
-add_executable(packet-sniffer ${SRC})
+if (NOT CMAKE_GENERATOR MATCHES "Visual Studio")
+	add_executable(packet-sniffer ${SRC})
+else()
+	add_executable(packet-sniffer WIN32 ${SRC})
+	set_target_properties(
+		packet-sniffer PROPERTIES
+		VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+	)
+
+	set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT packet-sniffer)
+endif()
 
 # =================== external libraries ===============================
 find_package(OpenGL REQUIRED)
