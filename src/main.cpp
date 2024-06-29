@@ -3,6 +3,7 @@
 #include "ProtocolType.h"
 #include "RawPacket.h"
 #include "core/core.hpp"
+#include "core/log.hpp"
 #include "gui-context.hpp"
 #include "gui/imgui_memory_editor.h"
 #include "imgui.h"
@@ -11,11 +12,11 @@
 #include "analyze.hpp"
 #include "monitor.hpp"
 
-// this cuz windows and unix interpet
+// this cuz windows and unix interpet 
 // name and description differently
-#if _WIN32		// windows
+#if _WIN32 // windows
 	#define DEVICE_NAME(d) d->getDesc().c_str()
-#else		 // unix
+#else // unix
 	#define DEVICE_NAME(d) d->getName().c_str()
 #endif
 
@@ -47,7 +48,7 @@ struct PacketStats {
 
 	PacketStats() { clear(); }
 
-	void consume_packet(pcpp::Packet &packet) {
+	void consume_packet(pcpp::Packet& packet) {
 		if (packet.isPacketOfType(pcpp::Ethernet)) ethPacketCount++;
 		if (packet.isPacketOfType(pcpp::IPv4)) ipv4PacketCount++;
 		if (packet.isPacketOfType(pcpp::IPv6)) ipv6PacketCount++;
@@ -104,12 +105,13 @@ int main() {
 	MemoryEditor memory_editor{};
 
 	auto device_list = pcpp::PcapLiveDeviceList::getInstance().getPcapLiveDevicesList();
-	pcpp::PcapLiveDevice *active_device = nullptr;
+	pcpp::PcapLiveDevice* active_device = nullptr;
 
 	struct {
 		std::optional<pcpp::Packet> active_packet;
-		pcpp::Layer *active_layer = nullptr;
+		pcpp::Layer* active_layer = nullptr;
 		u64 active_packet_index = -1;
+		std::string cur_filter;
 		bool monitor_mode = false;
 	} state;
 
@@ -134,6 +136,13 @@ int main() {
 		ImGui::EndMainMenuBar();
 
 		ImGui::Begin("Devices");
+		ImGui::Text("Filter:");
+		ImGui::SameLine();
+		if (ImGui::InputText("##filter", state.cur_filter.data(), 1000, ImGuiInputTextFlags_EnterReturnsTrue)) {
+			state.cur_filter = state.cur_filter.data();
+			PS_INFO("FILTER SET: " + state.cur_filter);
+			if (active_device) active_device->setFilter(state.cur_filter);
+		}
 		for (auto device : device_list) {
 			if (ImGui::Selectable(DEVICE_NAME(device), device->isOpened())) {
 				if (active_device && active_device->isOpened()) {
@@ -145,6 +154,7 @@ int main() {
 				bool res = device->open();
 				if (res) {
 					active_device = device;
+					if (state.cur_filter.empty()) active_device->setFilter("ip");
 					active_device->startCapture(on_packet, &data);
 				}
 			};
