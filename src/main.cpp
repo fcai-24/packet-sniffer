@@ -3,16 +3,17 @@
 #include "ProtocolType.h"
 #include "RawPacket.h"
 #include "core/core.hpp"
+#include "core/log.hpp"
 #include "gui-context.hpp"
 #include "imgui.h"
 #include "PcapLiveDeviceList.h"
 #include "gui/imgui_memory_editor.h"
 
-// this cuz windows and unix interpet 
+// this cuz windows and unix interpet
 // name and description differently
-#if _WIN32 // windows
+#if _WIN32		// windows
 	#define DEVICE_NAME(d) d->getDesc().c_str()
-#else // unix
+#else		 // unix
 	#define DEVICE_NAME(d) d->getName().c_str()
 #endif
 
@@ -95,11 +96,12 @@ int main() {
 		std::optional<pcpp::Packet> active_packet;
 		pcpp::Layer* active_layer = nullptr;
 		u64 active_packet_index = -1;
+		std::string cur_filter;
 	} state;
 
 	PacketsData data;
 
-	// this should always be the last variable before 
+	// this should always be the last variable before
 	// the loop so it's the first to be cleaned
 	// cuz we need the gui to desapier and then close other stuff
 	ps::GuiContext gui_context{1280, 720, "Packet Sniffer"};
@@ -114,6 +116,13 @@ int main() {
 		ImGui::EndMainMenuBar();
 
 		ImGui::Begin("Devices");
+		ImGui::Text("Filter:");
+		ImGui::SameLine();
+		if (ImGui::InputText("##filter", state.cur_filter.data(), 1000, ImGuiInputTextFlags_EnterReturnsTrue)) {
+			state.cur_filter = state.cur_filter.data();
+			PS_INFO("FILTER SET: " + state.cur_filter);
+			if (active_device) active_device->setFilter(state.cur_filter);
+		}
 		for (auto device : device_list) {
 			if (ImGui::Selectable(DEVICE_NAME(device), device->isOpened())) {
 				if (active_device && active_device->isOpened()) {
@@ -125,7 +134,7 @@ int main() {
 				bool res = device->open();
 				if (res) {
 					active_device = device;
-					active_device->setFilter("ip");
+					if (state.cur_filter.empty()) active_device->setFilter("ip");
 					active_device->startCapture(on_packet, &data);
 				}
 			};
