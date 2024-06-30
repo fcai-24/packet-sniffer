@@ -5,6 +5,8 @@
 #include "core/core.hpp"
 #include "core/log.hpp"
 #include "gui-context.hpp"
+#include "imgui.h"
+#include "PcapLiveDeviceList.h"
 #include "gui/imgui_memory_editor.h"
 #include "imgui.h"
 #include <mutex>
@@ -12,11 +14,11 @@
 #include "analyze.hpp"
 #include "monitor.hpp"
 
-// this cuz windows and unix interpet 
+// this cuz windows and unix interpet
 // name and description differently
-#if _WIN32 // windows
+#if _WIN32		// windows
 	#define DEVICE_NAME(d) d->getDesc().c_str()
-#else // unix
+#else		 // unix
 	#define DEVICE_NAME(d) d->getName().c_str()
 #endif
 
@@ -41,6 +43,7 @@ struct PacketStats {
 		ipv6PacketCount = 0;
 		tcpPacketCount = 0;
 		udpPacketCount = 0;
+		tcpPacketCount = 0;
 		dnsPacketCount = 0;
 		httpPacketCount = 0;
 		sslPacketCount = 0;
@@ -140,8 +143,14 @@ int main() {
 		ImGui::SameLine();
 		if (ImGui::InputText("##filter", state.cur_filter.data(), 1000, ImGuiInputTextFlags_EnterReturnsTrue)) {
 			state.cur_filter = state.cur_filter.data();
-			PS_INFO("FILTER SET: " + state.cur_filter);
-			if (active_device) active_device->setFilter(state.cur_filter);
+			if (active_device) {
+				// Set filter and print error to log if exists
+				if (active_device->setFilter(state.cur_filter)) {
+					PS_INFO("FILTER SET: " + state.cur_filter);
+				} else {
+					PS_ERROR("Cannot set filter: {}", state.cur_filter);
+				}
+			}
 		}
 		for (auto device : device_list) {
 			if (ImGui::Selectable(DEVICE_NAME(device), device->isOpened())) {
@@ -151,12 +160,15 @@ int main() {
 					active_device = nullptr;
 				}
 
-				bool res = device->open();
-				if (res) {
-					active_device = device;
-					if (state.cur_filter.empty()) active_device->setFilter("ip");
-					active_device->startCapture(on_packet, &data);
+				// Open device and check for errors
+				if (device->open()) {
+					PS_INFO("Opened device: {}", DEVICE_NAME(device));
+				} else {
+					PS_ERROR("Cannot open device: {}", DEVICE_NAME(device));
 				}
+				active_device = device;
+				if (state.cur_filter.empty()) active_device->setFilter("ip");
+				active_device->startCapture(on_packet, &data);
 			};
 		}
 		ImGui::End();
