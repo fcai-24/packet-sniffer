@@ -7,12 +7,15 @@
 #include "imgui.h"
 #include "PcapLiveDeviceList.h"
 #include "gui/imgui_memory_editor.h"
+#include <EthLayer.h>
+#include <IPv4Layer.h>
+#include <IPv6Layer.h>
+#include <TcpLayer.h>
+#include <UdpLayer.h>
 
-// this cuz windows and unix interpet 
-// name and description differently
-#if _WIN32 // windows
+#if _WIN32
 	#define DEVICE_NAME(d) d->getDesc().c_str()
-#else // unix
+#else
 	#define DEVICE_NAME(d) d->getName().c_str()
 #endif
 
@@ -34,7 +37,6 @@ struct PacketStats {
 		ipv6PacketCount = 0;
 		tcpPacketCount = 0;
 		udpPacketCount = 0;
-		tcpPacketCount = 0;
 		dnsPacketCount = 0;
 		httpPacketCount = 0;
 		sslPacketCount = 0;
@@ -99,9 +101,6 @@ int main() {
 
 	PacketsData data;
 
-	// this should always be the last variable before 
-	// the loop so it's the first to be cleaned
-	// cuz we need the gui to desapier and then close other stuff
 	ps::GuiContext gui_context{1280, 720, "Packet Sniffer"};
 	while (!gui_context.should_close()) {
 		gui_context.start_frame();
@@ -173,18 +172,70 @@ int main() {
 			ImGui::Begin("Packet Inspector");
 			auto layer = state.active_packet->getFirstLayer();
 			while (layer) {
-				if (layer->getOsiModelLayer() == pcpp::OsiModelNetworkLayer)
-					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 1, 0, 1));
-				else if (layer->getOsiModelLayer() == pcpp::OsiModelTransportLayer)
-					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92, 0.4, 0.92, 1));
-				else if (layer->getOsiModelLayer() == pcpp::OsiModelApplicationLayer)
-					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4, 0.92, 0.92, 1));
-				else
-					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+				ImVec4 color;
+				switch (layer->getOsiModelLayer()) {
+					case pcpp::OsiModelNetworkLayer: color = ImVec4(0, 1, 0, 1); break;
+					case pcpp::OsiModelTransportLayer: color = ImVec4(0.92, 0.4, 0.92, 1); break;
+					case pcpp::OsiModelApplicationLayer: color = ImVec4(0.4, 0.92, 0.92, 1); break;
+					default: color = ImVec4(1, 1, 1, 1); break;
+				}
+				ImGui::PushStyleColor(ImGuiCol_Text, color);
 
+				// Display detailed layer information
 				ImGui::Text("%s", layer->toString().c_str());
-				ImGui::PopStyleColor();
 
+				// Additional details based on layer type
+				switch (layer->getProtocol()) {
+					case pcpp::Ethernet:
+						ImGui::Text(
+								"Source MAC: %s", ((pcpp::EthLayer*)layer)->getSourceMac().toString().c_str());
+						ImGui::Text(
+								"Destination MAC: %s", ((pcpp::EthLayer*)layer)->getDestMac().toString().c_str());
+						break;
+					case pcpp::IPv4: {
+						auto ipv4Layer = dynamic_cast<pcpp::IPv4Layer*>(layer);
+						if (ipv4Layer) {
+							ImGui::Text("Header Length: %u", ipv4Layer->getHeaderLen());
+							ImGui::Text("TTL: %u", ipv4Layer->getIPv4Header()->timeToLive);
+						}
+						break;
+					}
+
+					case pcpp::IPv6: {
+						auto ipv6Layer = dynamic_cast<pcpp::IPv6Layer*>(layer);
+						if (ipv6Layer) {
+							ImGui::Text("Header Length: %u", ipv6Layer->getHeaderLen());
+							ImGui::Text("Hop Limit (TTL): %u", ipv6Layer->getIPv6Header()->hopLimit);
+						}
+						break;
+					}
+
+					case pcpp::TCP: {
+						auto tcpLayer = dynamic_cast<pcpp::TcpLayer*>(layer);
+						if (tcpLayer) {
+							ImGui::Text("Source Port: %d", tcpLayer->getSrcPort());
+							ImGui::Text("Destination Port: %d", tcpLayer->getDstPort());
+							ImGui::Text("Sequence Number: %u", tcpLayer->getTcpHeader()->sequenceNumber);
+							ImGui::Text("Acknowledgment Number: %u", tcpLayer->getTcpHeader()->ackNumber);
+							ImGui::Text("Flags:");
+							if (tcpLayer->getTcpHeader()->synFlag) ImGui::Text("    SYN");
+							if (tcpLayer->getTcpHeader()->ackFlag) ImGui::Text("    ACK");
+							if (tcpLayer->getTcpHeader()->finFlag) ImGui::Text("    FIN");
+						}
+						break;
+					}
+
+					case pcpp::UDP: {
+						auto udpLayer = dynamic_cast<pcpp::UdpLayer*>(layer);
+						if (udpLayer) {
+							ImGui::Text("Source Port: %d", udpLayer->getSrcPort());
+							ImGui::Text("Destination Port: %d", udpLayer->getDstPort());
+						}
+						break;
+					}
+				}
+
+				ImGui::PopStyleColor();
 				layer = layer->getNextLayer();
 			}
 			ImGui::End();
@@ -205,5 +256,7 @@ int main() {
 		active_device->close();
 	}
 
+#if _WIN32
 	return 0;
+#endif
 }
