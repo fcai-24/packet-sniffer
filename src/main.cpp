@@ -2,18 +2,20 @@
 #include <iterator>
 #include <mutex>
 #include <string_view>
-#include "IPv4Layer.h"
 #include "IpAddress.h"
 #include "Packet.h"
 #include "ProtocolType.h"
 #include "RawPacket.h"
-#include "TcpLayer.h"
 #include "core/core.hpp"
-#include "core/log.hpp"
 #include "gui-context.hpp"
 #include "imgui.h"
 #include "PcapLiveDeviceList.h"
 #include "gui/imgui_memory_editor.h"
+#include <EthLayer.h>
+#include <IPv4Layer.h>
+#include <IPv6Layer.h>
+#include <TcpLayer.h>
+#include <UdpLayer.h>
 
 #include "analyze.hpp"
 #include "monitor.hpp"
@@ -195,14 +197,13 @@ void on_packet(pcpp::RawPacket* raw_packet, pcpp::PcapLiveDevice* device, void* 
 	packets_lock.lock();
 	auto casted_data = static_cast<PacketsData*>(data);
 	// if (!ps::is_ieee802_11_packet(raw_packet->getRawData(), raw_packet->getRawDataLen())) {
-		auto packet = new pcpp::Packet(raw_packet);
-		if (!try_parse_websocket_handshake(packet, casted_data))
-			try_parse_websocket(packet, casted_data);
-		casted_data->stats.consume_packet(*packet);
-		casted_data->a.consume(*packet, device, casted_data->packets.size());
-		casted_data->packets.push_back(packet);
+	auto packet = new pcpp::Packet(raw_packet);
+	if (!try_parse_websocket_handshake(packet, casted_data)) try_parse_websocket(packet, casted_data);
+	casted_data->stats.consume_packet(*packet);
+	casted_data->a.consume(*packet, device, casted_data->packets.size());
+	casted_data->packets.push_back(packet);
 	// } else {
-		// casted_data->monitor_mode.parse_packet(raw_packet->getRawData(), raw_packet->getRawDataLen());
+	// casted_data->monitor_mode.parse_packet(raw_packet->getRawData(), raw_packet->getRawDataLen());
 	// }
 	packets_lock.unlock();
 }
@@ -303,7 +304,7 @@ int main() {
 			data.monitor_mode.draw();
 			packets_lock.unlock();
 		} else {
-			if (active_device){
+			if (active_device) {
 				ImGui::Begin("Packets");
 				packets_lock.lock();
 				u64 i = 0;
@@ -349,16 +350,68 @@ int main() {
 				ImGui::Begin("Packet Inspector");
 				auto layer = state.active_packet->getFirstLayer();
 				while (layer) {
-					if (layer->getOsiModelLayer() == pcpp::OsiModelNetworkLayer)
-						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 1, 0, 1));
-					else if (layer->getOsiModelLayer() == pcpp::OsiModelTransportLayer)
-						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92, 0.4, 0.92, 1));
-					else if (layer->getOsiModelLayer() == pcpp::OsiModelApplicationLayer)
-						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4, 0.92, 0.92, 1));
-					else
-						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+					ImVec4 color;
+					switch (layer->getOsiModelLayer()) {
+						case pcpp::OsiModelNetworkLayer: color = ImVec4(0, 1, 0, 1); break;
+						case pcpp::OsiModelTransportLayer: color = ImVec4(0.92, 0.4, 0.92, 1); break;
+						case pcpp::OsiModelApplicationLayer: color = ImVec4(0.4, 0.92, 0.92, 1); break;
+						default: color = ImVec4(1, 1, 1, 1); break;
+					}
+					ImGui::PushStyleColor(ImGuiCol_Text, color);
 
+					// Display detailed layer information
 					ImGui::Text("%s", layer->toString().c_str());
+					// Additional details based on layer type
+					switch (layer->getProtocol()) {
+						case pcpp::Ethernet:
+							ImGui::Text(
+									"Source MAC: %s", dynamic_cast<pcpp::EthLayer*>(layer)->getSourceMac().toString().c_str());
+							ImGui::Text(
+									"Destination MAC: %s", dynamic_cast<pcpp::EthLayer*>(layer)->getDestMac().toString().c_str());
+							break;
+						case pcpp::IPv4: {
+							auto ipv4Layer = dynamic_cast<pcpp::IPv4Layer*>(layer);
+							if (ipv4Layer) {
+								ImGui::Text("Header Length: %u", ipv4Layer->getHeaderLen());
+								ImGui::Text("TTL: %u", ipv4Layer->getIPv4Header()->timeToLive);
+							}
+							break;
+						}
+
+						case pcpp::IPv6: {
+							auto ipv6Layer = dynamic_cast<pcpp::IPv6Layer*>(layer);
+							if (ipv6Layer) {
+								ImGui::Text("Header Length: %u", ipv6Layer->getHeaderLen());
+								ImGui::Text("Hop Limit (TTL): %u", ipv6Layer->getIPv6Header()->hopLimit);
+							}
+							break;
+						}
+
+						case pcpp::TCP: {
+							auto tcpLayer = dynamic_cast<pcpp::TcpLayer*>(layer);
+							if (tcpLayer) {
+								ImGui::Text("Source Port: %d", tcpLayer->getSrcPort());
+								ImGui::Text("Destination Port: %d", tcpLayer->getDstPort());
+								ImGui::Text("Sequence Number: %u", tcpLayer->getTcpHeader()->sequenceNumber);
+								ImGui::Text("Acknowledgment Number: %u", tcpLayer->getTcpHeader()->ackNumber);
+								ImGui::Text("Flags:");
+								if (tcpLayer->getTcpHeader()->synFlag) ImGui::Text("    SYN");
+								if (tcpLayer->getTcpHeader()->ackFlag) ImGui::Text("    ACK");
+								if (tcpLayer->getTcpHeader()->finFlag) ImGui::Text("    FIN");
+							}
+							break;
+						}
+
+						case pcpp::UDP: {
+							auto udpLayer = dynamic_cast<pcpp::UdpLayer*>(layer);
+							if (udpLayer) {
+								ImGui::Text("Source Port: %d", udpLayer->getSrcPort());
+								ImGui::Text("Destination Port: %d", udpLayer->getDstPort());
+							}
+							break;
+						}
+					}
+
 					ImGui::PopStyleColor();
 
 					layer = layer->getNextLayer();
