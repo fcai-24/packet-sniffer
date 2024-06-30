@@ -2,6 +2,12 @@
 
 packet sniffer as graduation project using libpcap
 
+## TODOs:
+- Add Filters.
+- More info when parsing packet layers.
+- At 1 custum protocol parsing.
+- a graph of connections.
+
 ## setup dev env
 
 ### make sure cmake is installed at least version 3.25

@@ -103,6 +103,7 @@ namespace ps {
 		ImGuiIO& io = ImGui::GetIO();
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;		 // Enable Keyboard Controls
 		io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+		io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
 		// io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
 		ImGui_ImplGlfw_InitForOpenGL(window, true);
