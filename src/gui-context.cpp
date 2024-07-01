@@ -96,6 +96,7 @@ namespace ps {
 		// set opengl context to be the current window
 		glfwMakeContextCurrent(window);
 		glfwSwapInterval(1);		// Enable vsync
+
 		// imgui init
 		IMGUI_CHECKVERSION();
 		ImGui::CreateContext();

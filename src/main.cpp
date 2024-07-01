@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <iterator>
 #include <mutex>
+#include <vector>
 #include <string_view>
 #include "IpAddress.h"
 #include "Packet.h"
@@ -16,6 +17,9 @@
 #include <IPv6Layer.h>
 #include <TcpLayer.h>
 #include <UdpLayer.h>
+#include <unordered_map>
+#include <chrono>
+#include <iostream>
 
 #include "analyze.hpp"
 #include "monitor.hpp"
@@ -33,6 +37,74 @@
 #define SSID_ELEMENT_ID			 0
 
 std::mutex packets_lock;
+
+std::string header_str;		 // Declaration for header information
+std::string payload_str;		// Declaration for payload information
+
+// Structure to store performance metrics and intrusion detection
+struct PerformanceMetrics {
+	std::unordered_map<std::string, std::chrono::time_point<std::chrono::high_resolution_clock>>
+			requestTimes;
+	std::unordered_map<std::string, uint32_t> expectedSeq;
+	std::unordered_map<std::string, uint64_t> byteCounts;
+	std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
+
+	PerformanceMetrics() { startTime = std::chrono::high_resolution_clock::now(); }
+
+	void recordLatency(
+			const std::string& flowKey,
+			const std::chrono::time_point<std::chrono::high_resolution_clock>& timePoint) {
+		if (requestTimes.find(flowKey) != requestTimes.end()) {
+			auto latency =
+					std::chrono::duration_cast<std::chrono::milliseconds>(timePoint - requestTimes[flowKey])
+							.count();
+			std::cout << "Latency for " << flowKey << ": " << latency << " ms\n";
+			requestTimes.erase(flowKey);
+		} else {
+			requestTimes[flowKey] = timePoint;
+		}
+	}
+
+	void recordPacketLoss(const std::string& flowKey, uint32_t seq) {
+		if (expectedSeq.find(flowKey) != expectedSeq.end() && seq > expectedSeq[flowKey]) {
+			std::cout << "Packet loss detected in flow " << flowKey << "\n";
+		}
+		expectedSeq[flowKey] = seq;
+	}
+
+	void recordBandwidthUsage(const std::string& flowKey, uint64_t bytes) {
+		byteCounts[flowKey] += bytes;
+	}
+
+	void reportBandwidthUsage() {
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		auto elapsedTime =
+				std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
+
+		if (elapsedTime >= 1) {
+			std::cout << "Bandwidth usage:\n";
+			for (const auto& entry : byteCounts) {
+				std::cout << entry.first << ": " << entry.second / elapsedTime << " bytes/sec\n";
+			}
+			byteCounts.clear();
+			startTime = currentTime;
+		}
+	}
+
+	// Intrusion Detection Example: Check for unusual bandwidth usage
+	bool detectBandwidthAnomaly(const std::string& flowKey, uint64_t bytes) {
+		// Example threshold: Detect if bandwidth usage exceeds 10 MB/sec
+		constexpr uint64_t threshold = 10 * 1024 * 1024;		// 10 MB in bytes per second
+		auto averageBytesPerSecond =
+				byteCounts[flowKey] / std::chrono::duration_cast<std::chrono::seconds>(
+																	std::chrono::high_resolution_clock::now() - startTime)
+																	.count();
+
+		return bytes > threshold;
+	}
+};
+
+PerformanceMetrics metrics;
 
 struct PacketStats {
 	int ethPacketCount;
@@ -194,7 +266,7 @@ void try_parse_websocket(pcpp::Packet* packet, PacketsData* data) {
 void on_packet(pcpp::RawPacket* raw_packet, pcpp::PcapLiveDevice* device, void* data) {
 	if (!device) return;
 
-	packets_lock.lock();
+	std::lock_guard<std::mutex> lock(packets_lock);
 	auto casted_data = static_cast<PacketsData*>(data);
 	// if (!ps::is_ieee802_11_packet(raw_packet->getRawData(), raw_packet->getRawDataLen())) {
 	auto packet = new pcpp::Packet(raw_packet);
@@ -205,7 +277,13 @@ void on_packet(pcpp::RawPacket* raw_packet, pcpp::PcapLiveDevice* device, void* 
 	// } else {
 	// casted_data->monitor_mode.parse_packet(raw_packet->getRawData(), raw_packet->getRawDataLen());
 	// }
-	packets_lock.unlock();
+
+	// Check bandwidth anomaly
+	metrics.recordBandwidthUsage("flow_key", packet->getRawPacket()->getRawDataLen());
+	if (metrics.detectBandwidthAnomaly("flow_key", packet->getRawPacket()->getRawDataLen())) {
+		std::cout << "Bandwidth anomaly detected for flow_key\n";
+		// Trigger alert or take appropriate action
+	}
 }
 
 #if _WIN32
@@ -290,23 +368,22 @@ int main() {
 		ImGui::End();
 
 		ImGui::Begin("Stats");
-		packets_lock.lock();
-		data.stats.draw();
-		packets_lock.unlock();
+		{
+			std::lock_guard<std::mutex> lock(packets_lock);
+			data.stats.draw();
+		}
 		ImGui::End();
 
 		if (graph) {
-			packets_lock.lock();
+			std::lock_guard<std::mutex> lock(packets_lock);
 			data.a.draw();
-			packets_lock.unlock();
 		} else if (state.monitor_mode) {
-			packets_lock.lock();
+			std::lock_guard<std::mutex> lock(packets_lock);
 			data.monitor_mode.draw();
-			packets_lock.unlock();
 		} else {
 			if (active_device) {
 				ImGui::Begin("Packets");
-				packets_lock.lock();
+				std::lock_guard<std::mutex> lock(packets_lock);
 				u64 i = 0;
 				for (auto& packet : data.packets) {
 					if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(0.0f);
@@ -342,7 +419,6 @@ int main() {
 						ImGui::Separator();
 					}
 				}
-				packets_lock.unlock();
 				ImGui::End();
 			}
 
@@ -372,7 +448,7 @@ int main() {
 						case pcpp::IPv4: {
 							auto ipv4Layer = dynamic_cast<pcpp::IPv4Layer*>(layer);
 							if (ipv4Layer) {
-								ImGui::Text("Header Length: %u", ipv4Layer->getHeaderLen());
+								ImGui::Text("Header Length: %zu", ipv4Layer->getHeaderLen());
 								ImGui::Text("TTL: %u", ipv4Layer->getIPv4Header()->timeToLive);
 							}
 							break;
@@ -381,7 +457,7 @@ int main() {
 						case pcpp::IPv6: {
 							auto ipv6Layer = dynamic_cast<pcpp::IPv6Layer*>(layer);
 							if (ipv6Layer) {
-								ImGui::Text("Header Length: %u", ipv6Layer->getHeaderLen());
+								ImGui::Text("Header Length: %zu", ipv6Layer->getHeaderLen());
 								ImGui::Text("Hop Limit (TTL): %u", ipv6Layer->getIPv6Header()->hopLimit);
 							}
 							break;
