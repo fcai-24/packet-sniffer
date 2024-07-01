@@ -1,4 +1,6 @@
 #include <mutex>
+#include <optional>
+#include <vector>
 #include "Packet.h"
 #include "ProtocolType.h"
 #include "RawPacket.h"
@@ -12,6 +14,9 @@
 #include <IPv6Layer.h>
 #include <TcpLayer.h>
 #include <UdpLayer.h>
+#include <unordered_map>
+#include <chrono>
+#include <iostream>
 
 #if _WIN32
 	#define DEVICE_NAME(d) d->getDesc().c_str()
@@ -20,6 +25,74 @@
 #endif
 
 std::mutex packets_lock;
+
+std::string header_str;		 // Declaration for header information
+std::string payload_str;		// Declaration for payload information
+
+// Structure to store performance metrics and intrusion detection
+struct PerformanceMetrics {
+	std::unordered_map<std::string, std::chrono::time_point<std::chrono::high_resolution_clock>>
+			requestTimes;
+	std::unordered_map<std::string, uint32_t> expectedSeq;
+	std::unordered_map<std::string, uint64_t> byteCounts;
+	std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
+
+	PerformanceMetrics() { startTime = std::chrono::high_resolution_clock::now(); }
+
+	void recordLatency(
+			const std::string& flowKey,
+			const std::chrono::time_point<std::chrono::high_resolution_clock>& timePoint) {
+		if (requestTimes.find(flowKey) != requestTimes.end()) {
+			auto latency =
+					std::chrono::duration_cast<std::chrono::milliseconds>(timePoint - requestTimes[flowKey])
+							.count();
+			std::cout << "Latency for " << flowKey << ": " << latency << " ms\n";
+			requestTimes.erase(flowKey);
+		} else {
+			requestTimes[flowKey] = timePoint;
+		}
+	}
+
+	void recordPacketLoss(const std::string& flowKey, uint32_t seq) {
+		if (expectedSeq.find(flowKey) != expectedSeq.end() && seq > expectedSeq[flowKey]) {
+			std::cout << "Packet loss detected in flow " << flowKey << "\n";
+		}
+		expectedSeq[flowKey] = seq;
+	}
+
+	void recordBandwidthUsage(const std::string& flowKey, uint64_t bytes) {
+		byteCounts[flowKey] += bytes;
+	}
+
+	void reportBandwidthUsage() {
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		auto elapsedTime =
+				std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
+
+		if (elapsedTime >= 1) {
+			std::cout << "Bandwidth usage:\n";
+			for (const auto& entry : byteCounts) {
+				std::cout << entry.first << ": " << entry.second / elapsedTime << " bytes/sec\n";
+			}
+			byteCounts.clear();
+			startTime = currentTime;
+		}
+	}
+
+	// Intrusion Detection Example: Check for unusual bandwidth usage
+	bool detectBandwidthAnomaly(const std::string& flowKey, uint64_t bytes) {
+		// Example threshold: Detect if bandwidth usage exceeds 10 MB/sec
+		constexpr uint64_t threshold = 10 * 1024 * 1024;		// 10 MB in bytes per second
+		auto averageBytesPerSecond =
+				byteCounts[flowKey] / std::chrono::duration_cast<std::chrono::seconds>(
+																	std::chrono::high_resolution_clock::now() - startTime)
+																	.count();
+
+		return bytes > threshold;
+	}
+};
+
+PerformanceMetrics metrics;
 
 struct PacketStats {
 	int ethPacketCount;
@@ -74,11 +147,21 @@ struct PacketsData {
 
 void on_packet(pcpp::RawPacket* raw_packet, pcpp::PcapLiveDevice* device, void* data) {
 	auto casted_data = static_cast<PacketsData*>(data);
-	packets_lock.lock();
+	std::lock_guard<std::mutex> lock(packets_lock);
 	auto packet = pcpp::Packet(raw_packet);
 	casted_data->stats.consume_packet(packet);
 	casted_data->packets.push_back(packet);
-	packets_lock.unlock();
+
+	// Check bandwidth anomaly
+	metrics.recordBandwidthUsage("flow_key", packet.getRawPacket()->getRawDataLen());
+	if (metrics.detectBandwidthAnomaly("flow_key", packet.getRawPacket()->getRawDataLen())) {
+		std::cout << "Bandwidth anomaly detected for flow_key\n";
+		// Trigger alert or take appropriate action
+	}
+}
+
+std::string getDeviceName(pcpp::PcapLiveDevice* device) {
+	return device->getName();
 }
 
 #if _WIN32
@@ -96,7 +179,7 @@ int main() {
 	struct {
 		std::optional<pcpp::Packet> active_packet;
 		pcpp::Layer* active_layer = nullptr;
-		u64 active_packet_index = -1;
+		uint64_t active_packet_index = -1;
 	} state;
 
 	PacketsData data;
@@ -127,125 +210,138 @@ int main() {
 					active_device->setFilter("ip");
 					active_device->startCapture(on_packet, &data);
 				}
-			};
+			}
 		}
 		ImGui::End();
 
 		ImGui::Begin("Stats");
-		packets_lock.lock();
-		data.stats.draw();
-		packets_lock.unlock();
+		{
+			std::lock_guard<std::mutex> lock(packets_lock);
+			data.stats.draw();
+		}
 		ImGui::End();
 
 		if (active_device) {
 			ImGui::Begin("Packets");
-			packets_lock.lock();
-			u64 i = 0;
-			for (auto& packet : data.packets) {
-				if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(0.0f);
-				std::string id = packet.getLastLayer()->toString() + "##" + std::to_string(i);
+			{
+				std::lock_guard<std::mutex> lock(packets_lock);
+				uint64_t i = 0;
+				for (auto& packet : data.packets) {
+					if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(0.0f);
+					std::string id = packet.getLastLayer()->toString() + "##" + std::to_string(i);
 
-				auto layer = packet.getLastLayer()->getOsiModelLayer();
-				if (layer == pcpp::OsiModelNetworkLayer)
-					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 1, 0, 1));
-				else if (layer == pcpp::OsiModelTransportLayer)
-					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92, 0.4, 0.92, 1));
-				else if (layer == pcpp::OsiModelApplicationLayer)
-					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4, 0.92, 0.92, 1));
-				else
-					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+					auto layer = packet.getLastLayer()->getOsiModelLayer();
+					ImVec4 color;
+					switch (layer) {
+						case pcpp::OsiModelNetworkLayer: color = ImVec4(0, 1, 0, 1); break;
+						case pcpp::OsiModelTransportLayer: color = ImVec4(0.92, 0.4, 0.92, 1); break;
+						case pcpp::OsiModelApplicationLayer: color = ImVec4(0.4, 0.92, 0.92, 1); break;
+						default: color = ImVec4(1, 1, 1, 1); break;
+					}
 
-				if (ImGui::Selectable(id.c_str(), i == state.active_packet_index)) {
-					state.active_packet = packet;
-					state.active_packet_index = i;
-				};
+					ImGui::PushStyleColor(ImGuiCol_Text, color);
 
-				ImGui::PopStyleColor();
-				ImGui::Separator();
-				i++;
+					if (ImGui::Selectable(id.c_str(), i == state.active_packet_index)) {
+						state.active_packet = packet;
+						state.active_packet_index = i;
+					}
+
+					ImGui::PopStyleColor();
+					ImGui::Separator();
+					i++;
+				}
 			}
-			packets_lock.unlock();
 			ImGui::End();
 		}
 
 		if (state.active_packet.has_value()) {
 			ImGui::Begin("Packet Inspector");
-			auto layer = state.active_packet->getFirstLayer();
-			while (layer) {
-				ImVec4 color;
-				switch (layer->getOsiModelLayer()) {
-					case pcpp::OsiModelNetworkLayer: color = ImVec4(0, 1, 0, 1); break;
-					case pcpp::OsiModelTransportLayer: color = ImVec4(0.92, 0.4, 0.92, 1); break;
-					case pcpp::OsiModelApplicationLayer: color = ImVec4(0.4, 0.92, 0.92, 1); break;
-					default: color = ImVec4(1, 1, 1, 1); break;
+			{
+				auto& packet = state.active_packet.value();
+				auto layer = packet.getFirstLayer();
+				while (layer) {
+					ImVec4 color;
+					switch (layer->getOsiModelLayer()) {
+						case pcpp::OsiModelNetworkLayer: color = ImVec4(0, 1, 0, 1); break;
+						case pcpp::OsiModelTransportLayer: color = ImVec4(0.92, 0.4, 0.92, 1); break;
+						case pcpp::OsiModelApplicationLayer: color = ImVec4(0.4, 0.92, 0.92, 1); break;
+						default: color = ImVec4(1, 1, 1, 1); break;
+					}
+					ImGui::PushStyleColor(ImGuiCol_Text, color);
+
+					// Display detailed layer information
+					ImGui::Text("%s", layer->toString().c_str());
+
+					// Additional details based on layer type
+					switch (layer->getProtocol()) {
+						case pcpp::Ethernet: {
+							auto ethLayer = packet.getLayerOfType<pcpp::EthLayer>();
+							if (ethLayer) {
+								ImGui::Text("Source MAC: %s", ethLayer->getSourceMac().toString().c_str());
+								ImGui::Text("Destination MAC: %s", ethLayer->getDestMac().toString().c_str());
+							}
+							break;
+						}
+						case pcpp::IPv4: {
+							auto ipv4Layer = packet.getLayerOfType<pcpp::IPv4Layer>();
+							if (ipv4Layer) {
+								ImGui::Text("Header Length: %u", ipv4Layer->getHeaderLen());
+								ImGui::Text("TTL: %u", ipv4Layer->getIPv4Header()->timeToLive);
+							}
+							break;
+						}
+						case pcpp::IPv6: {
+							auto ipv6Layer = packet.getLayerOfType<pcpp::IPv6Layer>();
+							if (ipv6Layer) {
+								ImGui::Text("Header Length: %u", ipv6Layer->getHeaderLen());
+								ImGui::Text("Hop Limit (TTL): %u", ipv6Layer->getIPv6Header()->hopLimit);
+							}
+							break;
+						}
+						case pcpp::TCP: {
+							auto tcpLayer = packet.getLayerOfType<pcpp::TcpLayer>();
+							if (tcpLayer) {
+								ImGui::Text("Source Port: %d", tcpLayer->getSrcPort());
+								ImGui::Text("Destination Port: %d", tcpLayer->getDstPort());
+								ImGui::Text("Sequence Number: %u", tcpLayer->getTcpHeader()->sequenceNumber);
+								ImGui::Text("Acknowledgment Number: %u", tcpLayer->getTcpHeader()->ackNumber);
+								ImGui::Text("Flags:");
+								if (tcpLayer->getTcpHeader()->synFlag) ImGui::Text("    SYN");
+								if (tcpLayer->getTcpHeader()->ackFlag) ImGui::Text("    ACK");
+								if (tcpLayer->getTcpHeader()->finFlag) ImGui::Text("    FIN");
+							}
+							break;
+						}
+						case pcpp::UDP: {
+							auto udpLayer = packet.getLayerOfType<pcpp::UdpLayer>();
+							if (udpLayer) {
+								ImGui::Text("Source Port: %d", udpLayer->getSrcPort());
+								ImGui::Text("Destination Port: %d", udpLayer->getDstPort());
+							}
+							break;
+						}
+					}
+
+					ImGui::PopStyleColor();
+					layer = layer->getNextLayer();
 				}
-				ImGui::PushStyleColor(ImGuiCol_Text, color);
-
-				// Display detailed layer information
-				ImGui::Text("%s", layer->toString().c_str());
-
-				// Additional details based on layer type
-				switch (layer->getProtocol()) {
-					case pcpp::Ethernet:
-						ImGui::Text(
-								"Source MAC: %s", ((pcpp::EthLayer*)layer)->getSourceMac().toString().c_str());
-						ImGui::Text(
-								"Destination MAC: %s", ((pcpp::EthLayer*)layer)->getDestMac().toString().c_str());
-						break;
-					case pcpp::IPv4: {
-						auto ipv4Layer = dynamic_cast<pcpp::IPv4Layer*>(layer);
-						if (ipv4Layer) {
-							ImGui::Text("Header Length: %u", ipv4Layer->getHeaderLen());
-							ImGui::Text("TTL: %u", ipv4Layer->getIPv4Header()->timeToLive);
-						}
-						break;
-					}
-
-					case pcpp::IPv6: {
-						auto ipv6Layer = dynamic_cast<pcpp::IPv6Layer*>(layer);
-						if (ipv6Layer) {
-							ImGui::Text("Header Length: %u", ipv6Layer->getHeaderLen());
-							ImGui::Text("Hop Limit (TTL): %u", ipv6Layer->getIPv6Header()->hopLimit);
-						}
-						break;
-					}
-
-					case pcpp::TCP: {
-						auto tcpLayer = dynamic_cast<pcpp::TcpLayer*>(layer);
-						if (tcpLayer) {
-							ImGui::Text("Source Port: %d", tcpLayer->getSrcPort());
-							ImGui::Text("Destination Port: %d", tcpLayer->getDstPort());
-							ImGui::Text("Sequence Number: %u", tcpLayer->getTcpHeader()->sequenceNumber);
-							ImGui::Text("Acknowledgment Number: %u", tcpLayer->getTcpHeader()->ackNumber);
-							ImGui::Text("Flags:");
-							if (tcpLayer->getTcpHeader()->synFlag) ImGui::Text("    SYN");
-							if (tcpLayer->getTcpHeader()->ackFlag) ImGui::Text("    ACK");
-							if (tcpLayer->getTcpHeader()->finFlag) ImGui::Text("    FIN");
-						}
-						break;
-					}
-
-					case pcpp::UDP: {
-						auto udpLayer = dynamic_cast<pcpp::UdpLayer*>(layer);
-						if (udpLayer) {
-							ImGui::Text("Source Port: %d", udpLayer->getSrcPort());
-							ImGui::Text("Destination Port: %d", udpLayer->getDstPort());
-						}
-						break;
-					}
-				}
-
-				ImGui::PopStyleColor();
-				layer = layer->getNextLayer();
 			}
 			ImGui::End();
 
-			gui_context.push_font_mono();
-			memory_editor.DrawWindow(
-					"Raw Data",
-					(void*)state.active_packet.value().getRawPacket()->getRawData(),
-					state.active_packet.value().getRawPacket()->getRawDataLen());
-			gui_context.pull_font_mono();
+			ImGui::Begin("Data");
+			{
+				ImGui::Text("Header:");
+				ImGui::TextWrapped("%s", header_str.c_str());
+				ImGui::Separator();
+
+				gui_context.push_font_mono();
+				memory_editor.DrawWindow(
+						"Raw Data",
+						(void*)state.active_packet.value().getRawPacket()->getRawData(),
+						state.active_packet.value().getRawPacket()->getRawDataLen());
+				gui_context.pull_font_mono();
+			}
+			ImGui::End();
 		}
 
 		gui_context.end_frame();
@@ -260,3 +356,10 @@ int main() {
 	return 0;
 #endif
 }
+
+
+
+
+
+
+		
