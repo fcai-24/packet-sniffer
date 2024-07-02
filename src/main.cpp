@@ -17,9 +17,7 @@
 #include <IPv6Layer.h>
 #include <TcpLayer.h>
 #include <UdpLayer.h>
-#include <unordered_map>
-#include <chrono>
-#include <iostream>
+#include <string>
 
 #include "analyze.hpp"
 #include "monitor.hpp"
@@ -37,11 +35,10 @@
 #define SSID_ELEMENT_ID			 0
 
 std::mutex packets_lock;
-
 std::string header_str;		 // Declaration for header information
 std::string payload_str;		// Declaration for payload information
 
-// Structure to store performance metrics and intrusion detection
+// Structure to store performance metrics
 struct PerformanceMetrics {
 	std::unordered_map<std::string, std::chrono::time_point<std::chrono::high_resolution_clock>>
 			requestTimes;
@@ -54,7 +51,7 @@ struct PerformanceMetrics {
 	void recordLatency(
 			const std::string& flowKey,
 			const std::chrono::time_point<std::chrono::high_resolution_clock>& timePoint) {
-		if (requestTimes.find(flowKey) != requestTimes.end()) {
+		if (requestTimes.contains(flowKey)) {
 			auto latency =
 					std::chrono::duration_cast<std::chrono::milliseconds>(timePoint - requestTimes[flowKey])
 							.count();
@@ -66,7 +63,7 @@ struct PerformanceMetrics {
 	}
 
 	void recordPacketLoss(const std::string& flowKey, uint32_t seq) {
-		if (expectedSeq.find(flowKey) != expectedSeq.end() && seq > expectedSeq[flowKey]) {
+		if (expectedSeq.contains(flowKey) && seq > expectedSeq[flowKey]) {
 			std::cout << "Packet loss detected in flow " << flowKey << "\n";
 		}
 		expectedSeq[flowKey] = seq;
@@ -81,17 +78,21 @@ struct PerformanceMetrics {
 		auto elapsedTime =
 				std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count();
 
-		if (elapsedTime >= 1) {
+		// Adjust the reporting interval as needed, e.g., report every 5 seconds
+		constexpr int reportingInterval = 5;		// seconds
+
+		if (elapsedTime >= reportingInterval) {
 			std::cout << "Bandwidth usage:\n";
 			for (const auto& entry : byteCounts) {
 				std::cout << entry.first << ": " << entry.second / elapsedTime << " bytes/sec\n";
 			}
 			byteCounts.clear();
-			startTime = currentTime;
+			startTime = currentTime;		// Reset the start time for the next reporting interval
 		}
 	}
 
-	// Intrusion Detection Example: Check for unusual bandwidth usage
+
+	// Example intrusion detection: Check for unusual bandwidth usage
 	bool detectBandwidthAnomaly(const std::string& flowKey, uint64_t bytes) {
 		// Example threshold: Detect if bandwidth usage exceeds 10 MB/sec
 		constexpr uint64_t threshold = 10 * 1024 * 1024;		// 10 MB in bytes per second
@@ -100,7 +101,13 @@ struct PerformanceMetrics {
 																	std::chrono::high_resolution_clock::now() - startTime)
 																	.count();
 
-		return bytes > threshold;
+		bool anomalyDetected = bytes > threshold;
+		if (anomalyDetected) {
+			std::cout << "Bandwidth anomaly detected for " << flowKey << ": " << bytes / 1024 / 1024
+								<< " MB/sec\n";
+		}
+
+		return anomalyDetected;
 	}
 };
 
@@ -278,8 +285,17 @@ void on_packet(pcpp::RawPacket* raw_packet, pcpp::PcapLiveDevice* device, void* 
 	// casted_data->monitor_mode.parse_packet(raw_packet->getRawData(), raw_packet->getRawDataLen());
 	// }
 
-	// Check bandwidth anomaly
+	// Example: Record latency for each packet
+	metrics.recordLatency("flow_key", std::chrono::high_resolution_clock::now());
+
+	// Example: Record packet loss
+	uint32_t sequenceNumber = 0;		// Replace with actual sequence number retrieval
+	metrics.recordPacketLoss("flow_key", sequenceNumber);
+
+	// Example: Record bandwidth usage
 	metrics.recordBandwidthUsage("flow_key", packet->getRawPacket()->getRawDataLen());
+
+	// Example intrusion detection: Check for bandwidth anomaly
 	if (metrics.detectBandwidthAnomaly("flow_key", packet->getRawPacket()->getRawDataLen())) {
 		std::cout << "Bandwidth anomaly detected for flow_key\n";
 		// Trigger alert or take appropriate action
@@ -295,12 +311,15 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 int main() {
 #endif
 
+	// Initialize logging and GUI context
 	ps::Log::init();
 	MemoryEditor memory_editor{};
 
+	// Obtain list of available devices
 	auto device_list = pcpp::PcapLiveDeviceList::getInstance().getPcapLiveDevicesList();
 	pcpp::PcapLiveDevice* active_device = nullptr;
 
+	// State for the active packet inspection
 	struct {
 		pcpp::Packet* active_packet = nullptr;
 		pcpp::Layer* active_layer = nullptr;
@@ -309,6 +328,7 @@ int main() {
 		bool monitor_mode = false;
 	} state;
 
+	// Data structure to hold packets and statistics
 	PacketsData data;
 
 	bool graph = false;
@@ -316,19 +336,24 @@ int main() {
 	// this should always be the last variable before
 	// the loop so it's the first to be cleaned
 	// cuz we need the gui to disappear and then close other stuff
+	// Initialize GUI context
 	ps::GuiContext gui_context{1280, 720, "Packet Sniffer"};
+
+	// Main GUI loop
 	while (!gui_context.should_close()) {
 		gui_context.start_frame();
 
+		// Main menu bar
 		ImGui::BeginMainMenuBar();
-		if (ImGui::BeginMenu("file")) {
+		if (ImGui::BeginMenu("File")) {
 			if (ImGui::MenuItem("Toggle graph")) { graph = !graph; }
 			if (ImGui::MenuItem("Toggle monitor")) { state.monitor_mode = !state.monitor_mode; }
-			if (ImGui::MenuItem("close")) { gui_context.close_window(); }
+			if (ImGui::MenuItem("Close")) { gui_context.close_window(); }
 			ImGui::EndMenu();
 		}
 		ImGui::EndMainMenuBar();
 
+		// Device selection window
 		ImGui::Begin("Devices");
 		ImGui::Text("Filter:");
 		ImGui::SameLine();
@@ -370,6 +395,7 @@ int main() {
 		}
 		ImGui::End();
 
+		// Statistics display window
 		ImGui::Begin("Stats");
 		{
 			std::lock_guard<std::mutex> lock(packets_lock);
@@ -506,9 +532,14 @@ int main() {
 			}
 		}
 
+		// End frame for GUI context
 		gui_context.end_frame();
+
+		// Output performance metrics
+		metrics.reportBandwidthUsage();
 	}
 
+	// Clean up: Stop capture and close device
 	if (active_device) {
 		active_device->stopCapture();
 		active_device->close();
