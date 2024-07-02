@@ -166,6 +166,9 @@ std::string getDeviceName(pcpp::PcapLiveDevice* device) {
 
 #if _WIN32
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
+	AllocConsole();
+	freopen("CONOUT$", "w", stdout);
+	freopen("CONOUT$", "w", stderr);
 #else
 int main() {
 #endif
