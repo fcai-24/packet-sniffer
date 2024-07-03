@@ -1,5 +1,7 @@
 #pragma once
 
+#include "PcapLiveDevice.h"
+#include "core/core.hpp"
 #include "imgui.h"
 #include "ImNodeFlow.h"
 #include "Packet.h"
@@ -65,7 +67,7 @@ namespace ps {
 			auto host_node = host_interfaces[host_mac.toString()];
 			auto eth_layer = dynamic_cast<pcpp::EthLayer*>(packet.getFirstLayer());
 
-			if (host_mac != eth_layer->getDestMac()) {
+			if (eth_layer && host_mac != eth_layer->getDestMac()) {
 				// outgoing packet
 
 				bool new_other = false;
