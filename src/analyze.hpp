@@ -4,7 +4,6 @@
 #include "ImNodeFlow.h"
 #include "Packet.h"
 #include "EthLayer.h"
-#include <array>
 
 using namespace ImFlow;
 

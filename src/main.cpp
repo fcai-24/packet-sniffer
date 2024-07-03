@@ -9,6 +9,7 @@
 #include <mutex>
 
 #include "analyze.hpp"
+#include "monitor.hpp"
 
 // this cuz windows and unix interpet
 // name and description differently
@@ -17,6 +18,9 @@
 #else		 // unix
 	#define DEVICE_NAME(d) d->getName().c_str()
 #endif
+
+#define BEACON_FRAME_SUBTYPE 8
+#define SSID_ELEMENT_ID			 0
 
 std::mutex packets_lock;
 
@@ -66,51 +70,26 @@ struct PacketStats {
 	}
 };
 
-bool is_ieee80211_frame(const u8 *data, u64 len) {
-	if (len < 24) {		 // Minimum frame header size
-		return false;
-	}
-
-	uint8_t frame_control = data[0];
-	uint8_t protocol_version = frame_control & 0x03;
-	uint8_t type = (frame_control & 0x0C) >> 2;
-
-	// Protocol version should be 0, and type should be 0 (management), 1
-	// (control), or 2 (data)
-	return (protocol_version == 0) && (type == 0 || type == 1 || type == 2);
-}
-
-std::string extract_ssid(const u8 *data, u64 len) {
-	if (len < 36) {		 // Minimum frame size to contain SSID
-		return "";
-	}
-
-	return std::string(reinterpret_cast<const char *>(data + 0x40), 6);
-}
-
 struct PacketsData {
 	std::vector<pcpp::Packet> packets;
 	std::vector<std::string> ssid;
 	PacketStats stats;
-	ps::AnalyticsWindow a{};
+	ps::AnalyticsWindow a;
+	ps::MonitorMode monitor_mode;
 };
 
 void on_packet(pcpp::RawPacket *raw_packet, pcpp::PcapLiveDevice *device, void *data) {
 	if (!device) return;
 
-	auto casted_data = static_cast<PacketsData *>(data);
 	packets_lock.lock();
-
-	if (false && is_ieee80211_frame(raw_packet->getRawData(), raw_packet->getRawDataLen())) {
-		std::string ssid = extract_ssid(raw_packet->getRawData(), raw_packet->getRawDataLen());
-
-		casted_data->ssid.push_back("Beacon Frame: " + ssid);
-
-	} else {
+	auto casted_data = static_cast<PacketsData *>(data);
+	if (!ps::is_ieee802_11_packet(raw_packet->getRawData(), raw_packet->getRawDataLen())) {
 		auto packet = pcpp::Packet(raw_packet);
 		casted_data->stats.consume_packet(packet);
 		casted_data->a.consume(packet, device, casted_data->packets.size());
 		casted_data->packets.push_back(packet);
+	} else {
+		casted_data->monitor_mode.parse_packet(raw_packet->getRawData(), raw_packet->getRawDataLen());
 	}
 	packets_lock.unlock();
 }
@@ -131,6 +110,7 @@ int main() {
 		std::optional<pcpp::Packet> active_packet;
 		pcpp::Layer *active_layer = nullptr;
 		u64 active_packet_index = -1;
+		bool monitor_mode = false;
 	} state;
 
 	PacketsData data;
@@ -146,7 +126,8 @@ int main() {
 
 		ImGui::BeginMainMenuBar();
 		if (ImGui::BeginMenu("file")) {
-			if (ImGui::MenuItem("graph")) { graph = !graph; }
+			if (ImGui::MenuItem("Toggle graph")) { graph = !graph; }
+			if (ImGui::MenuItem("Toggle monitor")) { state.monitor_mode = !state.monitor_mode; }
 			if (ImGui::MenuItem("close")) { gui_context.close_window(); }
 			ImGui::EndMenu();
 		}
@@ -164,7 +145,6 @@ int main() {
 				bool res = device->open();
 				if (res) {
 					active_device = device;
-					active_device->setFilter("ip");
 					active_device->startCapture(on_packet, &data);
 				}
 			};
@@ -180,6 +160,10 @@ int main() {
 		if (graph) {
 			packets_lock.lock();
 			data.a.draw();
+			packets_lock.unlock();
+        } else if(state.monitor_mode) {
+			packets_lock.lock();
+            data.monitor_mode.draw();
 			packets_lock.unlock();
 		} else {
 			if (active_device) {
