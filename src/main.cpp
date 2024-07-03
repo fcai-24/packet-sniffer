@@ -82,15 +82,15 @@ struct PerformanceMetrics {
 		constexpr int reportingInterval = 5;		// seconds
 
 		if (elapsedTime >= reportingInterval) {
-			std::cout << "Bandwidth usage:\n";
 			for (const auto& entry : byteCounts) {
-				std::cout << entry.first << ": " << entry.second / elapsedTime << " bytes/sec\n";
+				std::cout << "Bandwidth usage:\n"
+									<< "Bandwidth usage:\n"
+									<< entry.first << ": " << entry.second / elapsedTime << " bytes/sec\n";
 			}
 			byteCounts.clear();
 			startTime = currentTime;		// Reset the start time for the next reporting interval
 		}
 	}
-
 
 	// Example intrusion detection: Check for unusual bandwidth usage
 	bool detectBandwidthAnomaly(const std::string& flowKey, uint64_t bytes) {
