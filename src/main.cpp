@@ -114,14 +114,14 @@ struct PerformanceMetrics {
 PerformanceMetrics metrics;
 
 struct PacketStats {
-	int ethPacketCount;
-	int ipv4PacketCount;
-	int ipv6PacketCount;
-	int tcpPacketCount;
-	int udpPacketCount;
-	int dnsPacketCount;
-	int httpPacketCount;
-	int sslPacketCount;
+	int ethPacketCount{};
+	int ipv4PacketCount{};
+	int ipv6PacketCount{};
+	int tcpPacketCount{};
+	int udpPacketCount{};
+	int dnsPacketCount{};
+	int httpPacketCount{};
+	int sslPacketCount{};
 
 	void clear() {
 		ethPacketCount = 0;
@@ -172,7 +172,7 @@ struct WebsocketConnection {
 };
 
 struct PacketsData {
-	std::vector<pcpp::Packet*> packets;
+	std::vector<pcpp::Packet> packets;
 	std::vector<std::string> ssid;
 	PacketStats stats;
 	ps::AnalyticsWindow a;
@@ -235,7 +235,7 @@ bool try_parse_websocket_handshake(const pcpp::Packet* packet, PacketsData* data
 	return false;
 };
 
-void try_parse_websocket(pcpp::Packet* packet, PacketsData* data) {
+void try_parse_websocket(pcpp::Packet* packet, const PacketsData* data) {
 	pcpp::Layer* last = packet->getLastLayer();
 	if (last->getProtocol() != pcpp::GenericPayload) return;
 	const auto* tcp = dynamic_cast<pcpp::TcpLayer*>(packet->getLayerOfType(pcpp::TCP));
@@ -276,13 +276,14 @@ void on_packet(pcpp::RawPacket* raw_packet, pcpp::PcapLiveDevice* device, void* 
 	std::lock_guard<std::mutex> lock(packets_lock);
 	auto casted_data = static_cast<PacketsData*>(data);
 	// if (!ps::is_ieee802_11_packet(raw_packet->getRawData(), raw_packet->getRawDataLen())) {
-	auto packet = new pcpp::Packet(raw_packet);
-	if (!try_parse_websocket_handshake(packet, casted_data)) try_parse_websocket(packet, casted_data);
-	casted_data->stats.consume_packet(*packet);
-	casted_data->a.consume(*packet, device, casted_data->packets.size());
-	casted_data->packets.push_back(packet);
+		auto packet = pcpp::Packet(raw_packet);
+		if (!try_parse_websocket_handshake(&packet, casted_data))
+			try_parse_websocket(&packet, casted_data);
+		casted_data->stats.consume_packet(packet);
+		casted_data->a.consume(packet, device, casted_data->packets.size());
+		casted_data->packets.push_back(packet);
 	// } else {
-	// casted_data->monitor_mode.parse_packet(raw_packet->getRawData(), raw_packet->getRawDataLen());
+	// 	casted_data->monitor_mode.parse_packet(raw_packet->getRawData(), raw_packet->getRawDataLen());
 	// }
 
 	// Example: Record latency for each packet
@@ -293,10 +294,10 @@ void on_packet(pcpp::RawPacket* raw_packet, pcpp::PcapLiveDevice* device, void* 
 	metrics.recordPacketLoss("flow_key", sequenceNumber);
 
 	// Example: Record bandwidth usage
-	metrics.recordBandwidthUsage("flow_key", packet->getRawPacket()->getRawDataLen());
+	metrics.recordBandwidthUsage("flow_key", raw_packet->getRawDataLen());
 
 	// Example intrusion detection: Check for bandwidth anomaly
-	if (metrics.detectBandwidthAnomaly("flow_key", packet->getRawPacket()->getRawDataLen())) {
+	if (metrics.detectBandwidthAnomaly("flow_key", raw_packet->getRawDataLen())) {
 		std::cout << "Bandwidth anomaly detected for flow_key\n";
 		// Trigger alert or take appropriate action
 	}
@@ -321,7 +322,7 @@ int main() {
 
 	// State for the active packet inspection
 	struct {
-		pcpp::Packet* active_packet = nullptr;
+		std::optional<pcpp::Packet> active_packet;
 		pcpp::Layer* active_layer = nullptr;
 		u64 active_packet_index = -1;
 		std::string cur_filter;
@@ -416,9 +417,9 @@ int main() {
 				u64 i = 0;
 				for (auto& packet : data.packets) {
 					if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(0.0f);
-					std::string id = packet->getLastLayer()->toString() + "##" + std::to_string(i);
+					std::string id = packet.getLastLayer()->toString() + "##" + std::to_string(i);
 
-					auto layer = packet->getLastLayer()->getOsiModelLayer();
+					auto layer = packet.getLastLayer()->getOsiModelLayer();
 					if (layer == pcpp::OsiModelNetworkLayer)
 						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 1, 0, 1));
 					else if (layer == pcpp::OsiModelTransportLayer)
@@ -451,7 +452,7 @@ int main() {
 				ImGui::End();
 			}
 
-			if (state.active_packet != nullptr) {
+			if (state.active_packet.has_value()) {
 				ImGui::Begin("Packet Inspector");
 				auto layer = state.active_packet->getFirstLayer();
 				while (layer) {
@@ -470,9 +471,11 @@ int main() {
 					switch (layer->getProtocol()) {
 						case pcpp::Ethernet:
 							ImGui::Text(
-									"Source MAC: %s", dynamic_cast<pcpp::EthLayer*>(layer)->getSourceMac().toString().c_str());
+									"Source MAC: %s",
+									dynamic_cast<pcpp::EthLayer*>(layer)->getSourceMac().toString().c_str());
 							ImGui::Text(
-									"Destination MAC: %s", dynamic_cast<pcpp::EthLayer*>(layer)->getDestMac().toString().c_str());
+									"Destination MAC: %s",
+									dynamic_cast<pcpp::EthLayer*>(layer)->getDestMac().toString().c_str());
 							break;
 						case pcpp::IPv4: {
 							auto ipv4Layer = dynamic_cast<pcpp::IPv4Layer*>(layer);
