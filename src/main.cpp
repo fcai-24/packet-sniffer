@@ -96,10 +96,12 @@ struct PerformanceMetrics {
 	bool detectBandwidthAnomaly(const std::string& flowKey, uint64_t bytes) {
 		// Example threshold: Detect if bandwidth usage exceeds 10 MB/sec
 		constexpr uint64_t threshold = 10 * 1024 * 1024;		// 10 MB in bytes per second
-		auto averageBytesPerSecond =
-				byteCounts[flowKey] / std::chrono::duration_cast<std::chrono::seconds>(
+		auto t = std::chrono::duration_cast<std::chrono::seconds>(
 																	std::chrono::high_resolution_clock::now() - startTime)
 																	.count();
+
+		auto averageBytesPerSecond =
+				t != 0 ? byteCounts[flowKey] / t : 0;
 
 		bool anomalyDetected = bytes > threshold;
 		if (anomalyDetected) {
@@ -252,8 +254,7 @@ void try_parse_websocket(pcpp::Packet* packet, const PacketsData* data) {
 			last->getDataLen(),
 			last->getHeaderLen(),
 			last->getLayerPayloadSize());
-	// ps::WebsocketLayer* ws = new ps::WebsocketLayer(last->getData(), last->getDataLen(),
-	// last->getPrevLayer(), packet);
+	// auto* ws = new ps::WebsocketLayer(last->getData(), last->getDataLen(), last->getPrevLayer(), nullptr);
 	auto* ws = new ps::WebsocketLayer(last);
 	packet->removeLastLayer();
 	packet->addLayer(ws, true);
@@ -386,9 +387,7 @@ int main() {
 				}
 				active_device = device;
 				// Set filter if exists
-				if (state.cur_filter.empty())
-					active_device->setFilter("ip");
-				else
+				if (!state.cur_filter.empty())
 					active_device->setFilter(state.cur_filter);
 
 				active_device->startCapture(on_packet, &data);
@@ -439,16 +438,6 @@ int main() {
 					i++;
 				}
 
-				if (!data.ssid.empty()) {
-					for (auto& ssid : data.ssid) {
-						if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(0.0f);
-
-						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8, 0.7, 0.3, 1));
-						ImGui::Selectable(ssid.c_str(), false);
-						ImGui::PopStyleColor();
-						ImGui::Separator();
-					}
-				}
 				ImGui::End();
 			}
 
