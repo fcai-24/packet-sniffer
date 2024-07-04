@@ -4,12 +4,24 @@
 #include "ProtocolType.h"
 #include "SystemUtils.h"
 #include "core/core.hpp"
-#ifdef __APPLE__
+#if defined(__APPLE__)
 	#include <libkern/OSByteOrder.h>
 
-	#define be16toh(x) OSSwapBigToHostInt16(x)
-	#define be32toh(x) OSSwapBigToHostInt32(x)
 	#define be64toh(x) OSSwapBigToHostInt64(x)
+
+#elif defined(__LINUX)
+	#include <endian.h>
+
+#elif defined(_WIN32) || defined(_WIN64)
+	#include <winsock2.h>
+	#include <ws2tcpip.h>
+	#pragma comment(lib, "Ws2_32.lib")
+
+uint64_t ntohll(uint64_t value) {
+	return (((uint64_t)ntohl((uint32_t)(value & 0xFFFFFFFF)) << 32) | ntohl((uint32_t)(value >> 32)));
+}
+
+	#define be64toh(x) ntohll(x)
 #endif
 
 namespace ps {
@@ -71,7 +83,7 @@ namespace ps {
 		}
 
 		void parseHeader() {
-			const wshdr* ws_header = (wshdr*)m_Data;
+			const wshdr* ws_header = reinterpret_cast<wshdr*>(m_Data);
 
 			const u8* current_ptr = m_Data + 2;
 			u64 actual_length = ws_header->payload_len;
@@ -95,14 +107,19 @@ namespace ps {
 			m_PayloadLen = actual_length;
 		}
 
-		wshdr* getHeader() const { return (wshdr*)m_Data; }
+		[[nodiscard]] wshdr* getHeader() const { return reinterpret_cast<wshdr*>(m_Data); }
 
 		void parseNextLayer() override { m_NextLayer = nullptr; }
 
 		[[nodiscard]] size_t getHeaderLen() const override { return m_ExtendedHeaderLen; }
-		size_t getPayloadLen() const { return m_PayloadLen; }
+		[[nodiscard]] size_t getPayloadLen() const { return m_PayloadLen; }
 
 		void computeCalculateFields() override {}
+
+		bool isConnectionClose() {
+			if (getHeader()->opcode == CONNECTION_CLOSE) return true;
+			return false;
+		}
 
 		[[nodiscard]] std::string toString() const override {
 			std::ostringstream text;
